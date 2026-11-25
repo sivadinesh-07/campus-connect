@@ -16,27 +16,49 @@ const forumRoutes = require('./routes/forumRoutes');
 
 const app = express();
 
-// Connect to database then auto-seed admin
-connectDB().then(async () => {
-  const existing = await User.findOne({ role: 'admin' });
-  if (!existing) {
-    await User.create({
-      name: process.env.ADMIN_NAME || 'Administrator',
-      email: process.env.ADMIN_EMAIL || 'admin@campus.edu',
-      password: process.env.ADMIN_PASSWORD || 'Admin@123',
-      role: 'admin',
-    });
-    console.log(`✅ Admin seeded: ${process.env.ADMIN_EMAIL}`);
-  }
-});
-
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, '/uploads')));
 
+// Connect to MongoDB per request (ensures connection ready in serverless environments)
+app.use(async (req, res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (error) {
+    return res.status(500).json({ error: 'Database connection failed', details: error.message });
+  }
+});
+
+// Admin auto-seeding flag
+let adminSeeded = false;
+const seedAdmin = async () => {
+  if (adminSeeded) return;
+  try {
+    const existing = await User.findOne({ role: 'admin' });
+    if (!existing) {
+      await User.create({
+        name: process.env.ADMIN_NAME || 'Administrator',
+        email: process.env.ADMIN_EMAIL || 'admin@campus.edu',
+        password: process.env.ADMIN_PASSWORD || 'Admin@123',
+        role: 'admin',
+      });
+      console.log(`✅ Admin seeded: ${process.env.ADMIN_EMAIL || 'admin@campus.edu'}`);
+    }
+    adminSeeded = true;
+  } catch (err) {
+    console.error('Admin seed error:', err.message);
+  }
+};
+
+// Seed admin on first auth check
+app.use('/api/auth', async (req, res, next) => {
+  await seedAdmin();
+  authRoutes(req, res, next);
+});
+
 // Routes
-app.use('/api/auth', authRoutes);
 app.use('/api/complaints', complaintRoutes);
 app.use('/api/lost-found', lostFoundRoutes);
 app.use('/api/bookings', bookingRoutes);
